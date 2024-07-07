@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from models import db, Restaurant, RestaurantPizza, Pizza
 from flask_migrate import Migrate
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response,jsonify
 from flask_restful import Api, Resource
 import os
 
@@ -23,6 +23,76 @@ api = Api(app)
 @app.route("/")
 def index():
     return "<h1>Code challenge</h1>"
+
+class RestaurantsResource(Resource):
+    def get(self):
+        restaurants = Restaurant.query.all()
+        return [restaurant.to_dict(only=('address', 'id', 'name')) for restaurant in restaurants], 200
+
+api.add_resource(RestaurantsResource, '/restaurants')
+
+@app.route('/restaurants/<int:id>', methods=['GET', 'DELETE'])
+def get_restaurant_by_id(id):
+    restaurant = Restaurant.query.filter(Restaurant.id == id).first()
+    if request.method == 'GET':
+        if restaurant:
+            restaurant_dict = restaurant.to_dict(
+                only=('id', 'name', 'address', 'restaurant_pizzas.id', 'restaurant_pizzas.price', 'restaurant_pizzas.pizza_id', 'restaurant_pizzas.restaurant_id', 'restaurant_pizzas.pizza.id', 'restaurant_pizzas.pizza.name', 'restaurant_pizzas.pizza.ingredients')
+            )
+            return make_response(jsonify(restaurant_dict), 200)
+        else:
+            return make_response(jsonify({"error": "Restaurant not found"}), 404)
+    elif request.method == 'DELETE':
+        if restaurant:
+            db.session.delete(restaurant)
+            db.session.commit()
+            return make_response(jsonify({'deleted': True}), 204)
+        else:
+            return make_response(jsonify({'error': "Restaurant not found"}), 404)
+class PizzasResource(Resource):
+    def get(self):
+        pizzas = Pizza.query.all()
+        return [pizza.to_dict(only=('id', 'ingredients', 'name')) for pizza in pizzas], 200
+
+api.add_resource(PizzasResource, '/pizzas')
+
+@app.route('/restaurant_pizzas', methods=['POST'])
+def add_restaurant_pizza():
+    data = request.get_json()
+    price = data.get('price')
+    pizza_id = data.get('pizza_id')
+    restaurant_id = data.get('restaurant_id')
+
+    if not (price and pizza_id and restaurant_id):
+        return make_response(jsonify({"errors": ["validation errors"]}), 400)
+
+    try:
+        new_restaurant_pizza = RestaurantPizza(price=price, pizza_id=pizza_id, restaurant_id=restaurant_id)
+        db.session.add(new_restaurant_pizza)
+        db.session.commit()
+
+        restaurant = Restaurant.query.filter(Restaurant.id == restaurant_id).first()
+        pizza = Pizza.query.filter(Pizza.id == pizza_id).first()
+        response_data = {
+            "id": new_restaurant_pizza.id,
+            "price": new_restaurant_pizza.price,
+            "pizza_id": new_restaurant_pizza.pizza_id,
+            "restaurant_id": new_restaurant_pizza.restaurant_id,
+            "pizza": {
+                "id": pizza.id,
+                "name": pizza.name,
+                "ingredients": pizza.ingredients
+            },
+            "restaurant": {
+                "id": restaurant.id,
+                "name": restaurant.name,
+                "address": restaurant.address
+            }
+        }
+        return make_response(jsonify(response_data), 201)
+    except ValueError as e:
+        return make_response(jsonify({"errors": ["validation errors"]}), 400)
+
 
 
 if __name__ == "__main__":
